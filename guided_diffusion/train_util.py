@@ -10,7 +10,7 @@ import torch.distributed as dist
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.optim import AdamW
 
-from scripts.autoencoder import get_model
+from runners.autoencoder import get_model
 import wandb
 from torchvision.utils import make_grid, save_image
 
@@ -48,19 +48,19 @@ class TrainLoop:
         weight_decay=0.0,
         lr_anneal_steps=0,
         max_steps=1000000,
-        eval_interval = 5000,
-        ce_weight = 0,
+        eval_interval=5000,
+        ce_weight=0,
         label_smooth=0.0,
-        use_hdfs = False,
-        grad_clip = 1.0,
-        local_rank = 0,
+        use_hdfs=False,
+        grad_clip=1.0,
+        local_rank=0,
         autoencoder_path=None,
         betas=(0.9, 0.999),
-        cls_cond_training = False,
+        cls_cond_training=False,
         train_classifier=False,
         scale_factor=0.18215,
         autoencoder_stride=8,
-        autoencoder_type='KL',
+        autoencoder_type="KL",
         warm_up_iters=-1,
         encode_online=False,
         encode_cls=False,
@@ -78,11 +78,7 @@ class TrainLoop:
         self.batch_size = batch_size
         self.microbatch = microbatch if microbatch > 0 else batch_size
         self.lr = lr
-        self.ema_rate = (
-            [ema_rate]
-            if isinstance(ema_rate, float)
-            else [float(x) for x in ema_rate.split(",")]
-        )
+        self.ema_rate = [ema_rate] if isinstance(ema_rate, float) else [float(x) for x in ema_rate.split(",")]
         self.log_interval = log_interval
         self.save_interval = save_interval
         self.resume_checkpoint = resume_checkpoint
@@ -121,20 +117,18 @@ class TrainLoop:
         )
 
         self.opt = AdamW(
-            self.mp_trainer.master_params, lr=self.lr, weight_decay=self.weight_decay, betas=self.betas,
+            self.mp_trainer.master_params,
+            lr=self.lr,
+            weight_decay=self.weight_decay,
+            betas=self.betas,
         )
         if self.resume_step:
             self._load_optimizer_state()
             # Model was resumed, either due to a restart or a checkpoint
             # being specified at the command line.
-            self.ema_params = [
-                self._load_ema_parameters(rate) for rate in self.ema_rate
-            ]
+            self.ema_params = [self._load_ema_parameters(rate) for rate in self.ema_rate]
         else:
-            self.ema_params = [
-                copy.deepcopy(self.mp_trainer.master_params)
-                for _ in range(len(self.ema_rate))
-            ]
+            self.ema_params = [copy.deepcopy(self.mp_trainer.master_params) for _ in range(len(self.ema_rate))]
 
         if th.cuda.is_available():
             self.use_ddp = True
@@ -148,10 +142,7 @@ class TrainLoop:
             )
         else:
             if dist.get_world_size() > 1:
-                logger.warn(
-                    "Distributed training requires CUDA. "
-                    "Gradients will not be synchronized properly!"
-                )
+                logger.warn("Distributed training requires CUDA. " "Gradients will not be synchronized properly!")
             self.use_ddp = False
             self.ddp_model = self.model
 
@@ -162,11 +153,7 @@ class TrainLoop:
             self.resume_step = parse_resume_step_from_filename(resume_checkpoint)
             if dist.get_rank() == 0:
                 logger.log(f"loading model from checkpoint: {resume_checkpoint}...")
-                self.model.load_state_dict(
-                    dist_util.load_state_dict(
-                        resume_checkpoint, map_location=dist_util.dev()
-                    )
-                )
+                self.model.load_state_dict(dist_util.load_state_dict(resume_checkpoint, map_location=dist_util.dev()))
 
         dist_util.sync_params(self.model.parameters())
 
@@ -178,9 +165,7 @@ class TrainLoop:
         if ema_checkpoint:
             if dist.get_rank() == 0:
                 logger.log(f"loading EMA from checkpoint: {ema_checkpoint}...")
-                state_dict = dist_util.load_state_dict(
-                    ema_checkpoint, map_location=dist_util.dev()
-                )
+                state_dict = dist_util.load_state_dict(ema_checkpoint, map_location=dist_util.dev())
                 ema_params = self.mp_trainer.state_dict_to_master_params(state_dict)
 
         dist_util.sync_params(ema_params)
@@ -188,29 +173,18 @@ class TrainLoop:
 
     def _load_optimizer_state(self):
         main_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
-        opt_checkpoint = bf.join(
-            bf.dirname(main_checkpoint), f"opt{self.resume_step:06}.pt"
-        )
+        opt_checkpoint = bf.join(bf.dirname(main_checkpoint), f"opt{self.resume_step:06}.pt")
         if bf.exists(opt_checkpoint):
             logger.log(f"loading optimizer state from checkpoint: {opt_checkpoint}")
-            state_dict = dist_util.load_state_dict(
-                opt_checkpoint, map_location=dist_util.dev()
-            )
+            state_dict = dist_util.load_state_dict(opt_checkpoint, map_location=dist_util.dev())
             self.opt.load_state_dict(state_dict)
 
     def run_loop(self):
-        while (
-            (not self.lr_anneal_steps
-            or self.step + self.resume_step < self.lr_anneal_steps) 
-            and (self.step + self.resume_step < self.max_steps)
-        ):
+        while (not self.lr_anneal_steps or self.step + self.resume_step < self.lr_anneal_steps) and (self.step + self.resume_step < self.max_steps):
             batch, cond = next(self.data)
             self.run_step(batch, cond)
 
-            if self.step > 0 and \
-                (self.step + self.resume_step) % self.eval_interval == 0 and \
-                self.ce_weight > 0.0 and \
-                self.val_data is not None:
+            if self.step > 0 and (self.step + self.resume_step) % self.eval_interval == 0 and self.ce_weight > 0.0 and self.val_data is not None:
 
                 self.eval_cls()
 
@@ -246,7 +220,7 @@ class TrainLoop:
             test_corrects, test_losses = [], []
             for img, labeldict in self.val_data:
                 bs = img.shape[0]
-                sub_labels = labeldict['y'].to(dist_util.dev())
+                sub_labels = labeldict["y"].to(dist_util.dev())
                 img = img.to(dist_util.dev())
                 if self.encode_online:
                     with th.no_grad():
@@ -266,12 +240,12 @@ class TrainLoop:
 
             loss_test = gather(test_losses)
             correct = gather(test_corrects)
-                        
+
             logger.logkv_mean(f"loss test", loss_test)
             logger.logkv_mean(f"test acc", correct)
 
             if dist.get_rank() == 0:
-                wandb.log({'loss_test': loss_test, 'test_acc': correct}, step=self.step + self.resume_step)
+                wandb.log({"loss_test": loss_test, "test_acc": correct}, step=self.step + self.resume_step)
 
         self.ddp_model.train()
 
@@ -280,13 +254,13 @@ class TrainLoop:
         took_step = self.mp_trainer.optimize(self.opt)
         if took_step:
             self._update_ema()
-        
+
         if self.warm_up_iters > 0:
             frac = (self.step + self.resume_step) / self.warm_up_iters
             lr = self.lr * (frac if frac < 1 else 1)
             for param_group in self.opt.param_groups:
                 param_group["lr"] = lr
-                
+
         self._anneal_lr()
         self.log_step()
 
@@ -296,23 +270,16 @@ class TrainLoop:
         if self.cls_batch_size > 0:
             batch_cls_t, cond_cls_t = next(self.data)
             batch_cls, cond_cls = next(self.data_cls)
-            
+
             micro_cls = batch_cls.to(dist_util.dev())
             if self.encode_online or self.encode_cls:
                 with th.no_grad():
                     micro_cls = self.autoencoder.encode(micro_cls)
-                
-            micro_cond_cls = {
-                k: v.to(dist_util.dev())
-                for k, v in cond_cls.items()
-            }
+
+            micro_cond_cls = {k: v.to(dist_util.dev()) for k, v in cond_cls.items()}
 
             micro_cls_t = batch_cls_t.to(dist_util.dev())
-            micro_cond_cls_t = {
-                k: v.to(dist_util.dev())
-                for k, v in cond_cls_t.items()
-            }
-            
+            micro_cond_cls_t = {k: v.to(dist_util.dev()) for k, v in cond_cls_t.items()}
 
             # sample noised sample
             t, weights = self.schedule_sampler.sample(micro_cls_t.shape[0], dist_util.dev())
@@ -327,11 +294,11 @@ class TrainLoop:
             t_cls = th.cat([t, t_cls])
 
             sqrt_alphas_cumprod = th.from_numpy(self.diffusion.sqrt_alphas_cumprod).to(device=t_cls.device)[t_cls].float()
-            
+
             with self.ddp_model.no_sync():
                 logits_cls = self.ddp_model(micro_cls, t_cls, cls_mode=True)
-                cls_gt = th.cat([micro_cond_cls_t['y'], micro_cond_cls['y']])
-                loss_cls = th.nn.CrossEntropyLoss(label_smoothing=self.label_smooth, reduction='none')(logits_cls, cls_gt)
+                cls_gt = th.cat([micro_cond_cls_t["y"], micro_cond_cls["y"]])
+                loss_cls = th.nn.CrossEntropyLoss(label_smoothing=self.label_smooth, reduction="none")(logits_cls, cls_gt)
                 loss_cls = (loss_cls * sqrt_alphas_cumprod).mean()
 
                 logger.logkv_mean("loss_ce_x0", loss_cls.item())
@@ -344,18 +311,15 @@ class TrainLoop:
                 with th.no_grad():
                     micro = self.autoencoder.encode(micro)
 
-            micro_cond = {
-                k: v[i : i + self.microbatch].to(dist_util.dev())
-                for k, v in cond.items()
-            }
+            micro_cond = {k: v[i : i + self.microbatch].to(dist_util.dev()) for k, v in cond.items()}
             last_batch = (i + self.microbatch) >= batch.shape[0]
             t, weights = self.schedule_sampler.sample(micro.shape[0], dist_util.dev())
 
-            micro_cond['label_smooth'] = self.label_smooth
-            micro_cond['train_classifier'] = False 
-            
-            rand_idx = th.rand(micro_cond['y'].shape, device=dist_util.dev()) < 0.1
-            micro_cond['y'][rand_idx] = self.model.num_classes
+            micro_cond["label_smooth"] = self.label_smooth
+            micro_cond["train_classifier"] = False
+
+            rand_idx = th.rand(micro_cond["y"].shape, device=dist_util.dev()) < 0.1
+            micro_cond["y"][rand_idx] = self.model.num_classes
 
             compute_losses = functools.partial(
                 self.diffusion.training_losses,
@@ -372,15 +336,11 @@ class TrainLoop:
                     losses = compute_losses()
 
             if isinstance(self.schedule_sampler, LossAwareSampler):
-                self.schedule_sampler.update_with_local_losses(
-                    t, losses["loss"].detach()
-                )
+                self.schedule_sampler.update_with_local_losses(t, losses["loss"].detach())
 
             loss = (losses["loss"] * weights).mean()
 
-            log_loss_dict(
-                self.diffusion, t, {k: v * weights for k, v in losses.items()}
-            )
+            log_loss_dict(self.diffusion, t, {k: v * weights for k, v in losses.items()})
             if last_batch or not self.use_ddp:
                 self.mp_trainer.backward(loss)
             else:
@@ -428,22 +388,27 @@ class TrainLoop:
 
             if self.use_hdfs:
                 hdfs_step = self.step + self.resume_step
-                with open('hdfs_step.txt', 'w') as f:
+                with open("hdfs_step.txt", "w") as f:
                     f.write(str(hdfs_step))
 
-                os.system('hdfs dfs -mkdir hdfs://haruna/home/byte_arnold_hl_vc/user/qsguo/{}'.format(get_blob_logdir()))
-                os.system('hdfs dfs -put -f hdfs_step.txt hdfs://haruna/home/byte_arnold_hl_vc/user/qsguo/{}'.format(get_blob_logdir()))
+                os.system("hdfs dfs -mkdir hdfs://haruna/home/byte_arnold_hl_vc/user/qsguo/{}".format(get_blob_logdir()))
+                os.system("hdfs dfs -put -f hdfs_step.txt hdfs://haruna/home/byte_arnold_hl_vc/user/qsguo/{}".format(get_blob_logdir()))
 
                 filename = f"model{(self.step+self.resume_step):06d}.pt"
-                hdfs_cmd = 'hdfs dfs -put {} hdfs://haruna/home/byte_arnold_hl_vc/user/qsguo/{} & \n'.format(bf.join(get_blob_logdir(), filename), get_blob_logdir())
+                hdfs_cmd = "hdfs dfs -put {} hdfs://haruna/home/byte_arnold_hl_vc/user/qsguo/{} & \n".format(
+                    bf.join(get_blob_logdir(), filename), get_blob_logdir()
+                )
                 for ema_rate in self.ema_rate:
                     filename = f"ema_{ema_rate}_{(self.step+self.resume_step):06d}.pt"
-                    hdfs_cmd += 'hdfs dfs -put {} hdfs://haruna/home/byte_arnold_hl_vc/user/qsguo/{} & \n'.format(bf.join(get_blob_logdir(), filename), get_blob_logdir())
-                
-                filename = f"opt{(self.step+self.resume_step):06d}.pt"
-                hdfs_cmd += 'hdfs dfs -put {} hdfs://haruna/home/byte_arnold_hl_vc/user/qsguo/{} & \n'.format(bf.join(get_blob_logdir(), filename), get_blob_logdir())
-                os.system(hdfs_cmd)
+                    hdfs_cmd += "hdfs dfs -put {} hdfs://haruna/home/byte_arnold_hl_vc/user/qsguo/{} & \n".format(
+                        bf.join(get_blob_logdir(), filename), get_blob_logdir()
+                    )
 
+                filename = f"opt{(self.step+self.resume_step):06d}.pt"
+                hdfs_cmd += "hdfs dfs -put {} hdfs://haruna/home/byte_arnold_hl_vc/user/qsguo/{} & \n".format(
+                    bf.join(get_blob_logdir(), filename), get_blob_logdir()
+                )
+                os.system(hdfs_cmd)
 
 
 def parse_resume_step_from_filename(filename):
@@ -472,17 +437,17 @@ def find_resume_checkpoint():
     # discover the latest checkpoint on your blob storage, etc.
     ckpt_steps = -1
     for name in bf.listdir(get_blob_logdir()):
-        if 'model' in name:
-            basename = name.split('.')[0]
+        if "model" in name:
+            basename = name.split(".")[0]
             step = int(basename[5:])
             ckpt_steps = max(step, ckpt_steps)
 
     if ckpt_steps > 0:
         ckpt_steps = str(ckpt_steps).zfill(6)
-        ckpt_path = bf.join(get_blob_logdir(), f'model{ckpt_steps}.pt')
+        ckpt_path = bf.join(get_blob_logdir(), f"model{ckpt_steps}.pt")
     else:
         ckpt_path = None
-        
+
     return ckpt_path
 
 

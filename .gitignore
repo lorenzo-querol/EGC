@@ -5,3 +5,4 @@ data/
 guided_diffusion.egg-info/
 openai_log/
 ckpts/
+wandb

@@ -10,23 +10,16 @@ import os
 import torch
 from torchvision import transforms
 
+
 class FeatureDataset(Dataset):
-    def __init__(self, 
-        path, 
-        scale_factor=0.18215,
-        double_z=True,
-        sample_z=True,
-        class_cond=False, 
-        img_num=1_281_167 * 2,
-        shard=0,
-        num_shards=1):
+    def __init__(self, path, scale_factor=0.18215, double_z=True, sample_z=True, class_cond=False, img_num=1_281_167 * 2, shard=0, num_shards=1):
         super().__init__()
         self.path = path
         self.class_cond = class_cond
         self.double_z = double_z
         self.sample_z = sample_z
         self.scale_factor = scale_factor
-        
+
         idx_list = list(range(img_num))
         self.idx_list = idx_list[shard:][::num_shards]
 
@@ -35,7 +28,7 @@ class FeatureDataset(Dataset):
 
     def __getitem__(self, idx):
         idx = self.idx_list[idx]
-        path = os.path.join(self.path, f'{idx}.npy')
+        path = os.path.join(self.path, f"{idx}.npy")
         z, label = np.load(path, allow_pickle=True)
         z = torch.from_numpy(z)
         if self.double_z:
@@ -54,7 +47,7 @@ class FeatureDataset(Dataset):
         out_dict = {}
         if self.class_cond:
             label = np.array(label)
-            out_dict['y'] = label
+            out_dict["y"] = label
         return z, out_dict
 
 
@@ -65,8 +58,8 @@ def load_ldm_data(
     img_num,
     class_cond=False,
     deterministic=False,
-    double_z = True,
-    sample_z = True,
+    double_z=True,
+    sample_z=True,
     scale_factor=0.18215,
 ):
     if not data_dir:
@@ -83,16 +76,13 @@ def load_ldm_data(
     )
 
     if deterministic:
-        loader = DataLoader(
-            dataset, batch_size=batch_size, shuffle=False, num_workers=8, drop_last=True
-        )
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=8, drop_last=True)
     else:
-        loader = DataLoader(
-            dataset, batch_size=batch_size, shuffle=True, num_workers=8, drop_last=True
-        )
-    
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=8, drop_last=True)
+
     while True:
         yield from loader
+
 
 def get_val_ldm_data(
     *,
@@ -100,8 +90,8 @@ def get_val_ldm_data(
     batch_size,
     img_num,
     class_cond=False,
-    double_z = True,
-    sample_z = True,
+    double_z=True,
+    sample_z=True,
     scale_factor=0.18215,
 ):
     """
@@ -127,20 +117,17 @@ def get_val_ldm_data(
     dataset = FeatureDataset(
         data_dir,
         class_cond=class_cond,
-        double_z = double_z,
-        sample_z = sample_z,
+        double_z=double_z,
+        sample_z=sample_z,
         scale_factor=scale_factor,
         img_num=img_num,
         shard=dist.get_rank(),
         num_shards=dist.get_world_size(),
     )
-    
-    loader = DataLoader(
-        dataset, batch_size=batch_size, shuffle=False, num_workers=8, drop_last=False
-    )
+
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=8, drop_last=False)
 
     return loader
-
 
 
 def load_data(
@@ -182,7 +169,7 @@ def load_data(
         class_names = [bf.basename(path).split("_")[0] for path in all_files]
         sorted_classes = {x: i for i, x in enumerate(sorted(set(class_names)))}
         classes = [sorted_classes[x] for x in class_names]
-    
+
     if weak_aug:
         dataset = ImageAugDataset(
             image_size,
@@ -203,14 +190,10 @@ def load_data(
         )
 
     if deterministic:
-        loader = DataLoader(
-            dataset, batch_size=batch_size, shuffle=False, num_workers=8, drop_last=True
-        )
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=8, drop_last=True)
     else:
-        loader = DataLoader(
-            dataset, batch_size=batch_size, shuffle=True, num_workers=8, drop_last=True
-        )
-    
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=8, drop_last=True)
+
     while True:
         yield from loader
 
@@ -261,14 +244,10 @@ def get_val_data(
         random_crop=random_crop,
         random_flip=random_flip,
     )
-    
-    loader = DataLoader(
-        dataset, batch_size=batch_size, shuffle=False, num_workers=8, drop_last=False
-    )
+
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=8, drop_last=False)
 
     return loader
-
-    
 
 
 def _list_image_files_recursively(data_dir):
@@ -342,10 +321,10 @@ class ImageAugDataset(Dataset):
         self.local_classes = None if classes is None else classes[shard:][::num_shards]
         self.transforms = transforms.Compose(
             [
-            transforms.RandomResizedCrop(resolution),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+                transforms.RandomResizedCrop(resolution),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
             ]
         )
 
@@ -366,19 +345,16 @@ class ImageAugDataset(Dataset):
             out_dict["y"] = np.array(self.local_classes[idx], dtype=np.int64)
         return arr, out_dict
 
+
 def center_crop_arr(pil_image, image_size):
     # We are not on a new enough PIL to support the `reducing_gap`
     # argument, which uses BOX downsampling at powers of two first.
     # Thus, we do it by hand to improve downsample quality.
     while min(*pil_image.size) >= 2 * image_size:
-        pil_image = pil_image.resize(
-            tuple(x // 2 for x in pil_image.size), resample=Image.BOX
-        )
+        pil_image = pil_image.resize(tuple(x // 2 for x in pil_image.size), resample=Image.BOX)
 
     scale = image_size / min(*pil_image.size)
-    pil_image = pil_image.resize(
-        tuple(round(x * scale) for x in pil_image.size), resample=Image.BICUBIC
-    )
+    pil_image = pil_image.resize(tuple(round(x * scale) for x in pil_image.size), resample=Image.BICUBIC)
 
     arr = np.array(pil_image)
     crop_y = (arr.shape[0] - image_size) // 2
@@ -395,14 +371,10 @@ def random_crop_arr(pil_image, image_size, min_crop_frac=0.8, max_crop_frac=1.0)
     # argument, which uses BOX downsampling at powers of two first.
     # Thus, we do it by hand to improve downsample quality.
     while min(*pil_image.size) >= 2 * smaller_dim_size:
-        pil_image = pil_image.resize(
-            tuple(x // 2 for x in pil_image.size), resample=Image.BOX
-        )
+        pil_image = pil_image.resize(tuple(x // 2 for x in pil_image.size), resample=Image.BOX)
 
     scale = smaller_dim_size / min(*pil_image.size)
-    pil_image = pil_image.resize(
-        tuple(round(x * scale) for x in pil_image.size), resample=Image.BICUBIC
-    )
+    pil_image = pil_image.resize(tuple(round(x * scale) for x in pil_image.size), resample=Image.BICUBIC)
 
     arr = np.array(pil_image)
     crop_y = random.randrange(arr.shape[0] - image_size + 1)

@@ -47,40 +47,37 @@ class AttentionPool2d(nn.Module):
         b, c, *_spatial = x.shape
         x = x.reshape(b, c, -1)  # NC(HW)
         x = th.cat([x.mean(dim=-1, keepdim=True), x], dim=-1)  # NC(HW+1)
-        #x = x + self.positional_embedding[None, :, :].to(x.dtype)  # NC(HW+1)
+        # x = x + self.positional_embedding[None, :, :].to(x.dtype)  # NC(HW+1)
         x = self.qkv_proj(x)
         x = self.attention(x)
         x = self.c_proj(x)
         return x[:, :, 0]
+
 
 class SimpleAttentionPool2d(nn.Module):
     """
     Adapted from CLIP: https://github.com/openai/CLIP/blob/main/clip/model.py
     """
 
-    def __init__(
-        self,
-    ):
+    def __init__(self):
         super().__init__()
-
 
     def forward(self, x):
         b, c, *_spatial = x.shape
         x = x.reshape(b, c, -1)  # NC(HW)
         x = th.cat([x.mean(dim=-1, keepdim=True), x], dim=-1)  # NC(HW+1)
-        
+
         ch = c
         q = k = v = x
         scale = 1 / math.sqrt(math.sqrt(ch))
-        weight = th.einsum(
-            "bct,bcs->bts", q * scale, k * scale
-        )  # More stable with f16 than dividing afterwards
+        weight = th.einsum("bct,bcs->bts", q * scale, k * scale)  # More stable with f16 than dividing afterwards
         weight = th.softmax(weight.float(), dim=-1).type(weight.dtype)
         x = th.einsum("bts,bcs->bct", weight, v)
 
         x = x.reshape(b, -1, x.shape[-1])
 
         return x[:, :, 0]
+
 
 class TimestepBlock(nn.Module):
     """
@@ -110,6 +107,7 @@ class TimestepEmbedSequential(nn.Sequential, TimestepBlock):
                 x = layer(x)
         return x
 
+
 class Upsample(nn.Module):
     """
     An upsampling layer with an optional convolution.
@@ -132,9 +130,7 @@ class Upsample(nn.Module):
     def forward(self, x):
         assert x.shape[1] == self.channels
         if self.dims == 3:
-            x = F.interpolate(
-                x, (x.shape[2], x.shape[3] * 2, x.shape[4] * 2), mode="nearest"
-            )
+            x = F.interpolate(x, (x.shape[2], x.shape[3] * 2, x.shape[4] * 2), mode="nearest")
         else:
             x = F.interpolate(x, scale_factor=2, mode="nearest")
         if self.use_conv:
@@ -160,9 +156,7 @@ class Downsample(nn.Module):
         self.dims = dims
         stride = 2 if dims != 3 else (1, 2, 2)
         if use_conv:
-            self.op = conv_nd(
-                dims, self.channels, self.out_channels, 3, stride=stride, padding=1
-            )
+            self.op = conv_nd(dims, self.channels, self.out_channels, 3, stride=stride, padding=1)
         else:
             assert self.channels == self.out_channels
             self.op = avg_pool_nd(dims, kernel_size=stride, stride=stride)
@@ -239,17 +233,13 @@ class ResBlock(TimestepBlock):
             normalization(self.out_channels),
             nn.SiLU(),
             nn.Dropout(p=dropout),
-            zero_module(
-                conv_nd(dims, self.out_channels, self.out_channels, 3, padding=1)
-            ),
+            zero_module(conv_nd(dims, self.out_channels, self.out_channels, 3, padding=1)),
         )
 
         if self.out_channels == channels:
             self.skip_connection = nn.Identity()
         elif use_conv:
-            self.skip_connection = conv_nd(
-                dims, channels, self.out_channels, 3, padding=1
-            )
+            self.skip_connection = conv_nd(dims, channels, self.out_channels, 3, padding=1)
         else:
             self.skip_connection = conv_nd(dims, channels, self.out_channels, 1)
 
@@ -261,9 +251,7 @@ class ResBlock(TimestepBlock):
         :param emb: an [N x emb_channels] Tensor of timestep embeddings.
         :return: an [N x C x ...] Tensor of outputs.
         """
-        return checkpoint(
-            self._forward, (x, emb), self.parameters(), self.use_checkpoint
-        )
+        return checkpoint(self._forward, (x, emb), self.parameters(), self.use_checkpoint)
 
     def _forward(self, x, emb):
         if self.updown:
@@ -309,9 +297,7 @@ class AttentionBlock(nn.Module):
         if num_head_channels == -1:
             self.num_heads = num_heads
         else:
-            assert (
-                channels % num_head_channels == 0
-            ), f"q,k,v channels {channels} is not divisible by num_head_channels {num_head_channels}"
+            assert channels % num_head_channels == 0, f"q,k,v channels {channels} is not divisible by num_head_channels {num_head_channels}"
             self.num_heads = channels // num_head_channels
         self.use_checkpoint = use_checkpoint
         self.norm = normalization(channels)
@@ -340,8 +326,6 @@ class AttentionBlock(nn.Module):
         else:
             return _inner_forward(x)
 
-    
-
 
 def count_flops_attn(model, _x, y):
     """
@@ -359,7 +343,7 @@ def count_flops_attn(model, _x, y):
     # We perform two matmuls with the same number of ops.
     # The first computes the weight matrix, the second computes
     # the combination of the value vectors.
-    matmul_ops = 2 * b * (num_spatial ** 2) * c
+    matmul_ops = 2 * b * (num_spatial**2) * c
     model.total_ops += th.DoubleTensor([matmul_ops])
 
 
@@ -384,9 +368,7 @@ class QKVAttentionLegacy(nn.Module):
         ch = width // (3 * self.n_heads)
         q, k, v = qkv.reshape(bs * self.n_heads, ch * 3, length).split(ch, dim=1)
         scale = 1 / math.sqrt(math.sqrt(ch))
-        weight = th.einsum(
-            "bct,bcs->bts", q * scale, k * scale
-        )  # More stable with f16 than dividing afterwards
+        weight = th.einsum("bct,bcs->bts", q * scale, k * scale)  # More stable with f16 than dividing afterwards
         weight = th.softmax(weight.float(), dim=-1).type(weight.dtype)
         a = th.einsum("bts,bcs->bct", weight, v)
         return a.reshape(bs, -1, length)
@@ -516,9 +498,7 @@ class UNetModel(nn.Module):
             self.label_emb = nn.Embedding(num_classes, time_embed_dim)
 
         ch = input_ch = int(channel_mult[0] * model_channels)
-        self.input_blocks = nn.ModuleList(
-            [TimestepEmbedSequential(conv_nd(dims, in_channels, ch, 3, padding=1))]
-        )
+        self.input_blocks = nn.ModuleList([TimestepEmbedSequential(conv_nd(dims, in_channels, ch, 3, padding=1))])
         self._feature_size = ch
         input_block_chans = [ch]
         ds = 1
@@ -564,9 +544,7 @@ class UNetModel(nn.Module):
                             down=True,
                         )
                         if resblock_updown
-                        else Downsample(
-                            ch, conv_resample, dims=dims, out_channels=out_ch
-                        )
+                        else Downsample(ch, conv_resample, dims=dims, out_channels=out_ch)
                     )
                 )
                 ch = out_ch
@@ -678,9 +656,7 @@ class UNetModel(nn.Module):
         :param y: an [N] Tensor of labels, if class-conditional.
         :return: an [N x C x ...] Tensor of outputs.
         """
-        assert (y is not None) == (
-            self.num_classes is not None
-        ), "must specify y if and only if the model is class-conditional"
+        assert (y is not None) == (self.num_classes is not None), "must specify y if and only if the model is class-conditional"
 
         hs = []
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
@@ -774,9 +750,7 @@ class EncoderUNetModel(nn.Module):
         )
 
         ch = int(channel_mult[0] * model_channels)
-        self.input_blocks = nn.ModuleList(
-            [TimestepEmbedSequential(conv_nd(dims, in_channels, ch, 3, padding=1))]
-        )
+        self.input_blocks = nn.ModuleList([TimestepEmbedSequential(conv_nd(dims, in_channels, ch, 3, padding=1))])
         self._feature_size = ch
         input_block_chans = [ch]
         ds = 1
@@ -822,9 +796,7 @@ class EncoderUNetModel(nn.Module):
                             down=True,
                         )
                         if resblock_updown
-                        else Downsample(
-                            ch, conv_resample, dims=dims, out_channels=out_ch
-                        )
+                        else Downsample(ch, conv_resample, dims=dims, out_channels=out_ch)
                     )
                 )
                 ch = out_ch
@@ -872,9 +844,7 @@ class EncoderUNetModel(nn.Module):
             self.out = nn.Sequential(
                 normalization(ch),
                 nn.SiLU(),
-                AttentionPool2d(
-                    (image_size // ds), ch, num_head_channels, out_channels
-                ),
+                AttentionPool2d((image_size // ds), ch, num_head_channels, out_channels),
             )
         elif pool == "spatial":
             self.out = nn.Sequential(
@@ -987,7 +957,7 @@ class EBMUNetModel(nn.Module):
         use_spatial_transformer=False,
         context_dim=512,
         transformer_depth=None,
-        pool='attn',
+        pool="attn",
     ):
         super().__init__()
 
@@ -1024,9 +994,7 @@ class EBMUNetModel(nn.Module):
         )
 
         ch = input_ch = int(channel_mult[0] * model_channels)
-        self.input_blocks = nn.ModuleList(
-            [TimestepEmbedSequential(conv_nd(dims, in_channels, ch, 3, padding=1))]
-        )
+        self.input_blocks = nn.ModuleList([TimestepEmbedSequential(conv_nd(dims, in_channels, ch, 3, padding=1))])
         self._feature_size = ch
         input_block_chans = [ch]
         ds = 1
@@ -1053,9 +1021,8 @@ class EBMUNetModel(nn.Module):
                             num_head_channels=num_head_channels,
                             use_new_attention_order=use_new_attention_order,
                         )
-                        if not use_spatial_transformer else SpatialTransformer(
-                            ch, num_heads, num_head_channels, depth=transformer_depth, context_dim=context_dim
-                        )
+                        if not use_spatial_transformer
+                        else SpatialTransformer(ch, num_heads, num_head_channels, depth=transformer_depth, context_dim=context_dim)
                     )
                 self.input_blocks.append(TimestepEmbedSequential(*layers))
                 self._feature_size += ch
@@ -1075,9 +1042,7 @@ class EBMUNetModel(nn.Module):
                             down=True,
                         )
                         if resblock_updown
-                        else Downsample(
-                            ch, conv_resample, dims=dims, out_channels=out_ch
-                        )
+                        else Downsample(ch, conv_resample, dims=dims, out_channels=out_ch)
                     )
                 )
                 ch = out_ch
@@ -1094,15 +1059,17 @@ class EBMUNetModel(nn.Module):
                 use_checkpoint=use_checkpoint,
                 use_scale_shift_norm=use_scale_shift_norm,
             ),
-            AttentionBlock(
-                ch,
-                use_checkpoint=use_checkpoint,
-                num_heads=num_heads,
-                num_head_channels=num_head_channels,
-                use_new_attention_order=use_new_attention_order,
-            ) if not use_spatial_transformer else SpatialTransformer(
-                            ch, num_heads, num_head_channels, depth=transformer_depth, context_dim=context_dim
-                        ),
+            (
+                AttentionBlock(
+                    ch,
+                    use_checkpoint=use_checkpoint,
+                    num_heads=num_heads,
+                    num_head_channels=num_head_channels,
+                    use_new_attention_order=use_new_attention_order,
+                )
+                if not use_spatial_transformer
+                else SpatialTransformer(ch, num_heads, num_head_channels, depth=transformer_depth, context_dim=context_dim)
+            ),
             ResBlock(
                 ch,
                 time_embed_dim,
@@ -1139,9 +1106,8 @@ class EBMUNetModel(nn.Module):
                             num_head_channels=num_head_channels,
                             use_new_attention_order=use_new_attention_order,
                         )
-                        if not use_spatial_transformer else SpatialTransformer(
-                            ch, num_heads, num_head_channels, depth=transformer_depth, context_dim=context_dim
-                        )
+                        if not use_spatial_transformer
+                        else SpatialTransformer(ch, num_heads, num_head_channels, depth=transformer_depth, context_dim=context_dim)
                     )
                 if level and i == num_res_blocks:
                     out_ch = ch
@@ -1177,11 +1143,9 @@ class EBMUNetModel(nn.Module):
             )
         elif pool == "attn":
             self.fc = nn.Sequential(
-                AttentionPool2d(
-                    image_size, out_channels, out_channels, num_classes
-                ),
+                AttentionPool2d(image_size, out_channels, out_channels, num_classes),
             )
-        elif pool == 'sattn':
+        elif pool == "sattn":
             self.fc = nn.Sequential(
                 SimpleAttentionPool2d(),
             )
@@ -1202,7 +1166,7 @@ class EBMUNetModel(nn.Module):
         self.middle_block.apply(convert_module_to_f32)
         self.output_blocks.apply(convert_module_to_f32)
 
-    def forward(self, x, timesteps, y=None, return_logits = False, cls_mode = False, cls_cond=False):
+    def forward(self, x, timesteps, y=None, return_logits=False, cls_mode=False, cls_cond=False):
         """
         Apply the model to an input batch.
 
@@ -1211,14 +1175,14 @@ class EBMUNetModel(nn.Module):
         :param y: an [N] Tensor of labels, if class-conditional.
         :return: an [N x C x ...] Tensor of outputs.
         """
-        
+
         if cls_mode:
             hs = []
             emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
-            #y = y * 0 + self.num_classes
+            # y = y * 0 + self.num_classes
             y = th.ones(x.shape[0]).long().to(x.device) * self.num_classes
             context = self.label_emb(y)
-            context = context[:,None,...]
+            context = context[:, None, ...]
 
             h = x.type(self.dtype)
             for module in self.input_blocks:
@@ -1232,14 +1196,14 @@ class EBMUNetModel(nn.Module):
             logits = self.out(h)
 
             return self.fc(logits)
-        
+
         else:
             with th.enable_grad():
                 hs = []
                 emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
                 if self.num_classes is not None:
                     context = self.label_emb(y)
-                    context = context[:,None,...]
+                    context = context[:, None, ...]
                 else:
                     context = None
 
@@ -1264,5 +1228,5 @@ class EBMUNetModel(nn.Module):
                     x_prime = th.autograd.grad(logits_logsumexp.sum(), [input_tensor])[0]
 
                 x_prime = x_prime * -1
-            
+
             return x_prime
