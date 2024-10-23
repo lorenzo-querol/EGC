@@ -140,6 +140,7 @@ def load_data(
     random_crop=False,
     random_flip=True,
     weak_aug=False,
+    in_channels=3,
 ):
     """
     For a dataset, create a generator over (images, kwargs) pairs.
@@ -160,9 +161,11 @@ def load_data(
     :param random_flip: if True, randomly flip the images for augmentation.
     """
     if not data_dir:
-        raise ValueError("unspecified data directory")
+        raise ValueError("Unspecified data directory")
+
     all_files = _list_image_files_recursively(data_dir)
     classes = None
+
     if class_cond:
         # Assume classes are the first part of the filename,
         # before an underscore.
@@ -187,6 +190,7 @@ def load_data(
             num_shards=dist.get_world_size(),
             random_crop=random_crop,
             random_flip=random_flip,
+            in_channels=in_channels,
         )
 
     if deterministic:
@@ -206,6 +210,7 @@ def get_val_data(
     class_cond=False,
     random_crop=False,
     random_flip=True,
+    in_channels=3,
 ):
     """
     For a dataset, create a generator over (images, kwargs) pairs.
@@ -226,7 +231,7 @@ def get_val_data(
     :param random_flip: if True, randomly flip the images for augmentation.
     """
     if not data_dir:
-        raise ValueError("unspecified data directory")
+        raise ValueError("Unspecified data directory")
     all_files = _list_image_files_recursively(data_dir)
     classes = None
     if class_cond:
@@ -243,6 +248,7 @@ def get_val_data(
         num_shards=dist.get_world_size(),
         random_crop=random_crop,
         random_flip=random_flip,
+        in_channels=in_channels,
     )
 
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=8, drop_last=False)
@@ -272,6 +278,7 @@ class ImageDataset(Dataset):
         num_shards=1,
         random_crop=False,
         random_flip=True,
+        in_channels=3,
     ):
         super().__init__()
         self.resolution = resolution
@@ -279,6 +286,7 @@ class ImageDataset(Dataset):
         self.local_classes = None if classes is None else classes[shard:][::num_shards]
         self.random_crop = random_crop
         self.random_flip = random_flip
+        self.in_channels = in_channels
 
     def __len__(self):
         return len(self.local_images)
@@ -288,7 +296,11 @@ class ImageDataset(Dataset):
         with bf.BlobFile(path, "rb") as f:
             pil_image = Image.open(f)
             pil_image.load()
-        pil_image = pil_image.convert("RGB")
+
+        if self.in_channels == 1:
+            pil_image = pil_image.convert("L")
+        else:
+            pil_image = pil_image.convert("RGB")
 
         if self.random_crop:
             arr = random_crop_arr(pil_image, self.resolution)
@@ -300,10 +312,15 @@ class ImageDataset(Dataset):
 
         arr = arr.astype(np.float32) / 127.5 - 1
 
+        if self.in_channels == 1:
+            arr = arr[None] if len(arr.shape) == 2 else np.expand_dims(arr, 0)
+        else:
+            arr = np.transpose(arr, [2, 0, 1]) if len(arr.shape) == 3 else arr
+
         out_dict = {}
         if self.local_classes is not None:
             out_dict["y"] = np.array(self.local_classes[idx], dtype=np.int64)
-        return np.transpose(arr, [2, 0, 1]), out_dict
+        return arr, out_dict
 
 
 class ImageAugDataset(Dataset):

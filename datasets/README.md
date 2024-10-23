@@ -1,6 +1,6 @@
 # Downloading datasets
 
-This directory includes instructions and scripts for downloading ImageNet and LSUN bedrooms for use in this codebase.
+This directory includes instructions and scripts for downloading the image datasets used in our experiments. We provide instructions for downloading the following datasets:
 
 ## Class-conditional ImageNet
 
@@ -15,13 +15,3 @@ for file in *.tar; do tar xf "$file"; rm "$file"; done
 This will extract and remove each tar file in turn.
 
 Once all of the images have been extracted, the resulting directory should be usable as a data directory (the `--data_dir` argument for the training script). The filenames should all start with WNID (class ids) followed by underscores, like `n01440764_2708.JPEG`. Conveniently (but not by accident) this is how the automated data-loader expects to discover class labels.
-
-## LSUN bedroom
-
-To download and pre-process LSUN bedroom, clone [fyu/lsun](https://github.com/fyu/lsun) on GitHub and run their download script `python3 download.py bedroom`. The result will be an "lmdb" database named like `bedroom_train_lmdb`. You can pass this to our [lsun_bedroom.py](lsun_bedroom.py) script like so:
-
-```
-python lsun_bedroom.py bedroom_train_lmdb lsun_train_output_dir
-```
-
-This creates a directory called `lsun_train_output_dir`. This directory can be passed to the training scripts via the `--data_dir` argument.

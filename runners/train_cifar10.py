@@ -2,10 +2,20 @@
 Train a diffusion model on images.
 """
 
+import os
+import sys
+
+# Get the current script's directory
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Add the parent directory to sys.path
+parent_dir = os.path.dirname(current_dir)
+sys.path.insert(0, parent_dir)
+
 import argparse
 
 from guided_diffusion import dist_util, logger
-from guided_diffusion.image_datasets import load_ldm_data, get_val_ldm_data, load_data
+from guided_diffusion.image_datasets import get_val_data, load_ldm_data, get_val_ldm_data, load_data
 from guided_diffusion.resample import create_named_schedule_sampler
 from guided_diffusion.script_util import (
     egc_model_and_diffusion_defaults,
@@ -15,16 +25,18 @@ from guided_diffusion.script_util import (
 )
 from guided_diffusion.train_util import TrainLoop
 
-import os
+
 import torch.distributed as dist
 import multiprocessing
 import blobfile as bf
 import wandb
 
+
 def get_blob_logdir():
     # You can change this to be a separate path to save checkpoints to
-    # a blobstore or some external drive.
+    # a blobstore or some external drive.egc_model_and_diffusion_defaul
     return logger.get_dir()
+
 
 def main():
     args = create_argparser().parse_args()
@@ -32,27 +44,26 @@ def main():
     dist_util.setup_dist()
     logger.configure()
 
-    logger.log("creating model and diffusion...")
+    logger.log("Creating model and diffusion...")
     if dist.get_rank() == 0:
         cfg = args_to_dict(args, egc_model_and_diffusion_defaults().keys())
-        name = logger.get_dir().split('/')[-1]
-        wandb.init(project=f'imagenet_EGC', config=cfg, name=name)
-        
-    model, diffusion = create_egc_model_and_diffusion(
-        **args_to_dict(args, egc_model_and_diffusion_defaults().keys())
-    )
+        name = logger.get_dir().split("/")[-1]
+        wandb.init(project=f"EGC", config=cfg, name=name)
+
+    model, diffusion = create_egc_model_and_diffusion(**args_to_dict(args, egc_model_and_diffusion_defaults().keys()))
     model.to(dist_util.dev())
     schedule_sampler = create_named_schedule_sampler(args.schedule_sampler, diffusion)
 
-    logger.log("creating data loader...")
-    data = load_ldm_data(
+    logger.log("Creating data loaders...")
+    data = load_data(
         data_dir=args.data_dir,
         batch_size=args.batch_size,
-        img_num=args.img_num,
+        image_size=args.input_size,
         class_cond=args.class_cond,
-        double_z=args.double_z,
-        sample_z=args.sample_z,
-        scale_factor=args.scale_factor,
+        random_flip=True,
+        random_crop=True,
+        deterministic=True,
+        in_channels=args.in_channels,
     )
 
     if args.cls_batch_size > 0:
@@ -61,31 +72,33 @@ def main():
             batch_size=args.cls_batch_size,
             image_size=args.input_size,
             class_cond=args.class_cond,
-            weak_aug=True,
+            random_flip=True,
+            random_crop=True,
+            deterministic=True,
+            in_channels=args.in_channels,
         )
     else:
         data_cls = None
-    
+
     if args.val_data_dir:
-        val_data = get_val_ldm_data(
+        val_data = get_val_data(
             data_dir=args.val_data_dir,
-            img_num=50000,
             batch_size=args.val_batch_size,
-            class_cond=True,
-            double_z=args.double_z,
-            sample_z=args.sample_z,
-            scale_factor=args.scale_factor,
+            image_size=args.input_size,
+            class_cond=args.class_cond,
+            random_flip=False,
+            in_channels=args.in_channels,
         )
     else:
         val_data = None
 
-    logger.log("training...")
+    logger.log("Training...")
     TrainLoop(
         model=model,
         diffusion=diffusion,
         data=data,
-        data_cls = data_cls,
-        val_data = val_data,
+        data_cls=data_cls,
+        val_data=val_data,
         batch_size=args.batch_size,
         cls_batch_size=args.cls_batch_size,
         microbatch=args.microbatch,
@@ -113,7 +126,7 @@ def main():
         autoencoder_stride=args.autoencoder_stride,
         autoencoder_type=args.autoencoder_type,
         warm_up_iters=args.warm_up_iters,
-        encode_cls=True,
+        encode_cls=False,
     ).run_loop()
 
 
@@ -152,8 +165,8 @@ def create_argparser():
         sample_z=False,
         double_z=True,
         scale_factor=0.18215,
-        autoencoder_stride='8',
-        autoencoder_type='KL',
+        autoencoder_stride="8",
+        autoencoder_type="KL",
         warm_up_iters=-1,
         input_size=32,
     )

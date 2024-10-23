@@ -1,11 +1,10 @@
 import argparse
-import os
 import tempfile
-
-from tqdm.auto import tqdm
 
 import medmnist
 from medmnist import INFO
+
+from datasets.utils import save_images
 
 
 def main(args):
@@ -14,25 +13,17 @@ def main(args):
 
     info = INFO[data_flag]
     DataClass = getattr(medmnist, info["python_class"])
-    CLASSES = [v for _, v in info["label"].items()]
+    classnames = [v for _, v in info["label"].items()]
 
     for split in ["train", "val", "test"]:
-        out_dir = f"{data_flag}_{size}_{split}"
-        if os.path.exists(out_dir):
-            print(f"Skipping split {split} since {out_dir} already exists.")
-            continue
+        out_dir = f"data/{data_flag}_{size}/{split}"
 
         print("Downloading...")
         with tempfile.TemporaryDirectory() as tmp_dir:
             dataset = DataClass(root=tmp_dir, split=split, download=True, size=size, mmap_mode="r")
 
         print("Dumping images...")
-        os.mkdir(out_dir)
-        for i in tqdm(range(len(dataset))):
-            image, label = dataset[i]
-            label = label[0]
-            filename = os.path.join(out_dir, f"{CLASSES[label]}_{i:05d}.png")
-            image.save(filename)
+        save_images(dataset, classnames, out_dir)
 
 
 if __name__ == "__main__":

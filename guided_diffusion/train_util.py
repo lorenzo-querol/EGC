@@ -10,6 +10,7 @@ import torch.distributed as dist
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.optim import AdamW
 
+from calibration.ece import ECELoss
 from runners.autoencoder import get_model
 import wandb
 from torchvision.utils import make_grid, save_image
@@ -218,6 +219,7 @@ class TrainLoop:
 
         with th.no_grad():
             test_corrects, test_losses = [], []
+            test_ece = []
             for img, labeldict in self.val_data:
                 bs = img.shape[0]
                 sub_labels = labeldict["y"].to(dist_util.dev())
@@ -229,6 +231,11 @@ class TrainLoop:
                 time = th.zeros(bs, device=dist_util.dev()).float()
                 logits = self.ddp_model(img, time, cls_mode=True)
 
+                # -----------------ECE-----------------
+                ece = ECELoss()(logits, sub_labels)
+                test_ece.append(ece)
+                # -----------------ECE-----------------
+
                 loss_test = th.nn.functional.cross_entropy(logits, sub_labels, reduction="none")
                 test_losses.append(loss_test)
 
@@ -237,12 +244,15 @@ class TrainLoop:
 
             test_losses = th.cat(test_losses)
             test_corrects = th.cat(test_corrects)
+            test_ece = th.cat(test_ece)
 
             loss_test = gather(test_losses)
             correct = gather(test_corrects)
+            ece = gather(test_ece)
 
             logger.logkv_mean(f"loss test", loss_test)
             logger.logkv_mean(f"test acc", correct)
+            logger.logkv_mean(f"ece", ece)
 
             if dist.get_rank() == 0:
                 wandb.log({"loss_test": loss_test, "test_acc": correct}, step=self.step + self.resume_step)
@@ -297,11 +307,18 @@ class TrainLoop:
 
             with self.ddp_model.no_sync():
                 logits_cls = self.ddp_model(micro_cls, t_cls, cls_mode=True)
+
+                # -----------------ECE-----------------
+                ece = ECELoss()(logits_cls, t_cls)
+                logger.logkv_mean("ece_x0", ece.item())
+                # -----------------ECE-----------------
+
                 cls_gt = th.cat([micro_cond_cls_t["y"], micro_cond_cls["y"]])
                 loss_cls = th.nn.CrossEntropyLoss(label_smoothing=self.label_smooth, reduction="none")(logits_cls, cls_gt)
                 loss_cls = (loss_cls * sqrt_alphas_cumprod).mean()
 
                 logger.logkv_mean("loss_ce_x0", loss_cls.item())
+
                 loss_cls = self.ce_weight * loss_cls
                 self.mp_trainer.backward(loss_cls)
 

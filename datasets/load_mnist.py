@@ -8,12 +8,12 @@ from utils import SPLIT_SEED, save_images
 
 
 def main():
-    out_dir = f"data/cifar10"
+    out_dir = f"data/mnist"
 
     for split in ["train", "test"]:
         print("Downloading...")
         with tempfile.TemporaryDirectory() as tmp_dir:
-            dataset = torchvision.datasets.CIFAR10(root=tmp_dir, train=split == "train", download=True)
+            dataset = torchvision.datasets.MNIST(root=tmp_dir, train=split == "train", download=True)
 
         if split == "train":
             train_size = floor(0.8 * len(dataset))

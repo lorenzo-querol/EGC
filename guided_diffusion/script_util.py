@@ -21,7 +21,7 @@ def diffusion_defaults():
         predict_xstart=False,
         rescale_timesteps=False,
         rescale_learned_sigmas=False,
-        linear_start=0.0001, 
+        linear_start=0.0001,
         linear_end=0.02,
     )
 
@@ -206,10 +206,10 @@ def egc_model_and_diffusion_defaults():
         resblock_updown=False,
         use_fp16=False,
         use_new_attention_order=False,
-        pool='attn',
+        pool="attn",
         out_channels=1000,
         num_classes=1000,
-        modeltype='cfg',
+        modeltype="cfg",
         in_channels=3,
         use_spatial_transformer=False,
         context_dim=512,
@@ -217,6 +217,7 @@ def egc_model_and_diffusion_defaults():
     )
     res.update(diffusion_defaults())
     return res
+
 
 def create_egc_model(
     image_size,
@@ -235,9 +236,9 @@ def create_egc_model(
     resblock_updown=False,
     use_fp16=False,
     use_new_attention_order=False,
-    pool='attn',
+    pool="attn",
     out_channels=1000,
-    modeltype='cfg',
+    modeltype="cfg",
     in_channels=3,
     num_classes=1000,
     use_spatial_transformer=False,
@@ -261,8 +262,8 @@ def create_egc_model(
     attention_ds = []
     for res in attention_resolutions.split(","):
         attention_ds.append(image_size // int(res))
-    
-    if modeltype == 'cfg':
+
+    if modeltype == "cfg":
         model = EBMUNetModel
 
     return model(
@@ -289,6 +290,7 @@ def create_egc_model(
         transformer_depth=transformer_depth,
     )
 
+
 def create_egc_model_and_diffusion(
     image_size,
     class_cond,
@@ -313,17 +315,18 @@ def create_egc_model_and_diffusion(
     resblock_updown,
     use_fp16,
     use_new_attention_order,
-    pool='attn',
+    pool="attn",
     out_channels=1000,
     num_classes=1000,
-    modeltype='cfg',
+    modeltype="cfg",
     in_channels=3,
     use_spatial_transformer=False,
     context_dim=512,
     transformer_depth=None,
-    linear_start=0.0001, 
+    linear_start=0.0001,
     linear_end=0.02,
 ):
+    print(num_classes)
     model = create_egc_model(
         image_size,
         num_channels,
@@ -359,10 +362,11 @@ def create_egc_model_and_diffusion(
         rescale_timesteps=rescale_timesteps,
         rescale_learned_sigmas=rescale_learned_sigmas,
         timestep_respacing=timestep_respacing,
-        linear_start=linear_start, 
+        linear_start=linear_start,
         linear_end=linear_end,
     )
     return model, diffusion
+
 
 def create_classifier_and_diffusion(
     image_size,
@@ -574,7 +578,7 @@ def create_gaussian_diffusion(
     rescale_timesteps=False,
     rescale_learned_sigmas=False,
     timestep_respacing="",
-    linear_start=0.0001, 
+    linear_start=0.0001,
     linear_end=0.02,
 ):
     betas = gd.get_named_beta_schedule(noise_schedule, steps, linear_start, linear_end)
@@ -589,17 +593,9 @@ def create_gaussian_diffusion(
     return SpacedDiffusion(
         use_timesteps=space_timesteps(steps, timestep_respacing),
         betas=betas,
-        model_mean_type=(
-            gd.ModelMeanType.EPSILON if not predict_xstart else gd.ModelMeanType.START_X
-        ),
+        model_mean_type=(gd.ModelMeanType.EPSILON if not predict_xstart else gd.ModelMeanType.START_X),
         model_var_type=(
-            (
-                gd.ModelVarType.FIXED_LARGE
-                if not sigma_small
-                else gd.ModelVarType.FIXED_SMALL
-            )
-            if not learn_sigma
-            else gd.ModelVarType.LEARNED_RANGE
+            (gd.ModelVarType.FIXED_LARGE if not sigma_small else gd.ModelVarType.FIXED_SMALL) if not learn_sigma else gd.ModelVarType.LEARNED_RANGE
         ),
         loss_type=loss_type,
         rescale_timesteps=rescale_timesteps,
