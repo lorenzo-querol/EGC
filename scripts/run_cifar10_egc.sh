@@ -4,7 +4,7 @@
 pip install blobfile tqdm
 
 # Define the log directory
-OPENAI_LOGDIR=./openai_log/cifar10
+OPENAI_LOGDIR=./logs/cifar10
 
 # Execute the training script with specified parameters
 
