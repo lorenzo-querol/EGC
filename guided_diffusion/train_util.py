@@ -123,6 +123,7 @@ class TrainLoop:
             weight_decay=self.weight_decay,
             betas=self.betas,
         )
+
         if self.resume_step:
             self._load_optimizer_state()
             # Model was resumed, either due to a restart or a checkpoint
@@ -219,7 +220,9 @@ class TrainLoop:
 
         with th.no_grad():
             test_corrects, test_losses = [], []
-            test_ece = []
+            test_ece = 0.0
+            n_batches = 0
+
             for img, labeldict in self.val_data:
                 bs = img.shape[0]
                 sub_labels = labeldict["y"].to(dist_util.dev())
@@ -232,8 +235,8 @@ class TrainLoop:
                 logits = self.ddp_model(img, time, cls_mode=True)
 
                 # -----------------ECE-----------------
-                ece = ECELoss()(logits, sub_labels)
-                test_ece.append(ece)
+                test_ece += ECELoss()(logits, sub_labels).item()
+                n_batches += 1
                 # -----------------ECE-----------------
 
                 loss_test = th.nn.functional.cross_entropy(logits, sub_labels, reduction="none")
@@ -244,18 +247,22 @@ class TrainLoop:
 
             test_losses = th.cat(test_losses)
             test_corrects = th.cat(test_corrects)
-            test_ece = th.cat(test_ece)
 
             loss_test = gather(test_losses)
             correct = gather(test_corrects)
-            ece = gather(test_ece)
+
+            # -----------------ECE-----------------
+            avg_ece = test_ece / n_batches
+            ece_tensor = th.tensor([avg_ece], device=dist_util.dev())
+            ece = gather(ece_tensor)
+            # -----------------ECE-----------------
 
             logger.logkv_mean(f"loss test", loss_test)
             logger.logkv_mean(f"test acc", correct)
-            logger.logkv_mean(f"ece", ece)
+            logger.logkv_mean(f"test ece", ece)
 
             if dist.get_rank() == 0:
-                wandb.log({"loss_test": loss_test, "test_acc": correct}, step=self.step + self.resume_step)
+                wandb.log({"loss_test": loss_test, "test_acc": correct, "test_ece": ece, "step": self.step + self.resume_step})
 
         self.ddp_model.train()
 
@@ -308,16 +315,16 @@ class TrainLoop:
             with self.ddp_model.no_sync():
                 logits_cls = self.ddp_model(micro_cls, t_cls, cls_mode=True)
 
-                # -----------------ECE-----------------
-                ece = ECELoss()(logits_cls, t_cls)
-                logger.logkv_mean("ece_x0", ece.item())
-                # -----------------ECE-----------------
-
                 cls_gt = th.cat([micro_cond_cls_t["y"], micro_cond_cls["y"]])
                 loss_cls = th.nn.CrossEntropyLoss(label_smoothing=self.label_smooth, reduction="none")(logits_cls, cls_gt)
                 loss_cls = (loss_cls * sqrt_alphas_cumprod).mean()
 
                 logger.logkv_mean("loss_ce_x0", loss_cls.item())
+
+                # -----------------ECE-----------------
+                ece = ECELoss()(logits_cls, t_cls)
+                logger.logkv_mean("ece_x0", ece.item())
+                # -----------------ECE-----------------
 
                 loss_cls = self.ce_weight * loss_cls
                 self.mp_trainer.backward(loss_cls)

@@ -113,7 +113,8 @@ def get_val_ldm_data(
     :param random_flip: if True, randomly flip the images for augmentation.
     """
     if not data_dir:
-        raise ValueError("unspecified data directory")
+        raise ValueError("Unspecified data directory")
+
     dataset = FeatureDataset(
         data_dir,
         class_cond=class_cond,
@@ -135,12 +136,12 @@ def load_data(
     data_dir,
     batch_size,
     image_size,
+    in_channels,
     class_cond=False,
     deterministic=False,
     random_crop=False,
     random_flip=True,
     weak_aug=False,
-    in_channels=3,
 ):
     """
     For a dataset, create a generator over (images, kwargs) pairs.
@@ -160,6 +161,7 @@ def load_data(
     :param random_crop: if True, randomly crop the images for augmentation.
     :param random_flip: if True, randomly flip the images for augmentation.
     """
+
     if not data_dir:
         raise ValueError("Unspecified data directory")
 
@@ -207,10 +209,10 @@ def get_val_data(
     data_dir,
     batch_size,
     image_size,
+    in_channels,
     class_cond=False,
     random_crop=False,
     random_flip=True,
-    in_channels=3,
 ):
     """
     For a dataset, create a generator over (images, kwargs) pairs.
@@ -230,16 +232,19 @@ def get_val_data(
     :param random_crop: if True, randomly crop the images for augmentation.
     :param random_flip: if True, randomly flip the images for augmentation.
     """
+
     if not data_dir:
         raise ValueError("Unspecified data directory")
+
     all_files = _list_image_files_recursively(data_dir)
     classes = None
+
     if class_cond:
-        # Assume classes are the first part of the filename,
-        # before an underscore.
+        # Assume classes are the first part of the filename, before an underscore.
         class_names = [bf.basename(path).split("_")[0] for path in all_files]
         sorted_classes = {x: i for i, x in enumerate(sorted(set(class_names)))}
         classes = [sorted_classes[x] for x in class_names]
+
     dataset = ImageDataset(
         image_size,
         all_files,
@@ -273,12 +278,12 @@ class ImageDataset(Dataset):
         self,
         resolution,
         image_paths,
+        in_channels,
         classes=None,
         shard=0,
         num_shards=1,
         random_crop=False,
         random_flip=True,
-        in_channels=3,
     ):
         super().__init__()
         self.resolution = resolution
@@ -297,10 +302,7 @@ class ImageDataset(Dataset):
             pil_image = Image.open(f)
             pil_image.load()
 
-        if self.in_channels == 1:
-            pil_image = pil_image.convert("L")
-        else:
-            pil_image = pil_image.convert("RGB")
+        pil_image = pil_image.convert("L" if self.in_channels == 1 else "RGB")
 
         if self.random_crop:
             arr = random_crop_arr(pil_image, self.resolution)
@@ -320,6 +322,7 @@ class ImageDataset(Dataset):
         out_dict = {}
         if self.local_classes is not None:
             out_dict["y"] = np.array(self.local_classes[idx], dtype=np.int64)
+
         return arr, out_dict
 
 

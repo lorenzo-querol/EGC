@@ -326,7 +326,6 @@ def create_egc_model_and_diffusion(
     linear_start=0.0001,
     linear_end=0.02,
 ):
-    print(num_classes)
     model = create_egc_model(
         image_size,
         num_channels,

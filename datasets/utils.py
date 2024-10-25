@@ -35,14 +35,14 @@ DATASETS_CLASSES = {
 }
 
 
-def save_images(dataset: str, out_dir: str, classnames: tuple | None = None) -> None:
+def save_images(dataset: str, out_dir: str, classnames=None) -> None:
     """
     Save images from the dataset to the output directory.
 
     Args:
         dataset (str): The dataset to save images from.
-        classes (tuple): The classes of the dataset.
         out_dir (str): The output directory to save images to.
+        classnames (tuple): The classes of the dataset. Defaults to `None`.
     Returns:
         None
     """
