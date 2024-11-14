@@ -59,18 +59,11 @@ def prepare_CIFAR10():
             dataset = torchvision.datasets.CIFAR10(root=tmp_dir, train=split == "train", download=True)
 
         if split == "train":
-            train_size = floor(0.8 * len(dataset))
-            val_size = len(dataset) - train_size
-            train_dataset, val_dataset = random_split(dataset, [train_size, val_size], generator=t.Generator().manual_seed(SPLIT_SEED))
-
-            print("Dumping training images...")
-            save_images(train_dataset, f"{out_dir}/train")
-
-            print("Dumping validation images...")
-            save_images(val_dataset, f"{out_dir}/val")
+            print("Dumping train images...")
+            save_images(dataset, "cifar10", f"{out_dir}/train")
         else:
             print("Dumping test images...")
-            save_images(dataset, f"{out_dir}/test")
+            save_images(dataset, "cifar10", f"{out_dir}/test")
 
 
 def prepare_CIFAR100():

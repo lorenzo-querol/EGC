@@ -110,17 +110,17 @@ def main():
         in_channels=args.in_channels,
         class_cond=args.class_cond,
         deterministic=True,
-        random_flip=True,
-        random_crop=True,
+        random_flip=False,
+        weak_aug=True,
     )
 
     val_data = get_val_data(
         data_dir=args.val_data_dir,
         batch_size=args.val_batch_size,
         image_size=args.input_size,
+        in_channels=args.in_channels,
         class_cond=args.class_cond,
         random_flip=False,
-        in_channels=args.in_channels,
     )
 
     logger.log("Training...")

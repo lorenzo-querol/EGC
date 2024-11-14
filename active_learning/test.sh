@@ -4,7 +4,7 @@
 # pip install blobfile tqdm
 
 # # Define the log directory
-# OPENAI_LOGDIR=./logs/mnist
+LOGDIR=./logs/dry_run
 
 # # Execute the training script with specified parameters
 
@@ -21,11 +21,22 @@ python3 -m torch.distributed.run \
   --master_port=29501 \
   active_learning/example.py \
   --model                   wrn \
-  --budget_ratio            0.1 \
-  --num_classes             10 \
+  --depth                   28 \
+  --width                   12 \
   --dropout_rate            0.3 \
-  --image_size              28 \
+  --norm                    batch \
+  --budget_ratio            0.1 \
+  --sampling_method         uncertainty \
+  --num_epochs              10 \
   --lr                      1e-4 \
+  --decay_epochs            60 120 160 \
+  --decay_rate              0.2 \
+  --data_dir                ./data \
+  --dataset                 bloodmnist_28 \
   --batch_size              128 \
-  --data_dir                .data/bloodmnist_28 \
+  --in_channels             3 \
+  --num_classes             8 \
+  --image_size              28 \
+  --eval_freq               10 \
+  --log_dir                 $LOGDIR \
 

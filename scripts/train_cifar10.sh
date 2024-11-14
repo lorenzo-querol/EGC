@@ -1,25 +1,16 @@
 #!/bin/bash
 
-# Install required packages
-pip install blobfile tqdm
-
 # Define the log directory
-OPENAI_LOGDIR=./logs/cifar10
+export OPENAI_LOGDIR=./openai_log/cifar10
 
 # Execute the training script with specified parameters
-
-# ------------------------------------------------------------------------------
-# NOTE: This script trains on 1 GPU
-# ------------------------------------------------------------------------------
-CUDA_VISIBLE_DEVICES=1 
-
 python3 -m torch.distributed.run \
-  --nproc_per_node=1 \
+  --nproc_per_node=2 \
   --nnodes=1 \
   --node_rank=0 \
   --master_addr=127.0.0.1 \
-  --master_port=29500 \
-  runners/train_cifar10.py \
+  --master_port=29501 \
+  runners/train_egc.py \
   --attention_resolutions   16,8 \
   --class_cond              True \
   --num_classes             10 \
@@ -40,15 +31,15 @@ python3 -m torch.distributed.run \
   --pool                    sattn \
   --lr                      1e-4 \
   --weight_decay            0.0 \
-  --batch_size              128 \
+  --batch_size              64 \
+  --cls_batch_size          64 \
   --val_batch_size          128 \
-  --cls_batch_size          128 \
-  --val_data_dir            ./data/cifar10/val \
+  --val_data_dir            ./data/cifar10/test \
   --data_dir                ./data/cifar10/train \
   --cls_data_dir            ./data/cifar10/train \
   --ce_weight               0.001 \
   --eval_interval           5000 \
-  --save_interval           5000 \
+  --save_interval           10000 \
   --label_smooth            0.2 \
   --grad_clip               1.0 \
   --channel_mult            1,2,2 \

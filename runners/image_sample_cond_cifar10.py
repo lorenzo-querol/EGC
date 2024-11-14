@@ -5,6 +5,12 @@ numpy array. This can be used to produce samples for FID evaluation.
 
 import argparse
 import os
+import sys
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
+parent_dir = os.path.dirname(current_dir)
+sys.path.insert(0, parent_dir)
 
 import numpy as np
 import torch as th
@@ -38,7 +44,7 @@ def main():
         model.convert_to_fp16()
     model.eval()
 
-    autoencoder_model = get_model(args.autoencoder_path, args.autoencoder_type, args.autoencoder_stride, args.scale_factor).cuda()
+    # autoencoder_model = get_model(args.autoencoder_path, args.autoencoder_type, args.autoencoder_stride, args.scale_factor).cuda()
 
     def cond_fn(x, t, y=None):
         assert y is not None
@@ -66,7 +72,7 @@ def main():
             cond_fn=cond_fn if args.class_cond else None,
         )
 
-        sample = autoencoder_model.decode(sample)
+        # sample = autoencoder_model.decode(sample)
         sample = ((sample + 1) * 127.5).clamp(0, 255).to(th.uint8)
         sample = sample.permute(0, 2, 3, 1)
         sample = sample.contiguous()

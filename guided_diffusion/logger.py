@@ -43,16 +43,14 @@ class HumanOutputFormat(KVWriter, SeqWriter):
             self.file = open(filename_or_file, "wt")
             self.own_file = True
         else:
-            assert hasattr(filename_or_file, "read"), (
-                "expected file or str, got %s" % filename_or_file
-            )
+            assert hasattr(filename_or_file, "read"), "expected file or str, got %s" % filename_or_file
             self.file = filename_or_file
             self.own_file = False
 
     def writekvs(self, kvs):
         # Create strings for printing
         key2str = {}
-        for (key, val) in sorted(kvs.items()):
+        for key, val in sorted(kvs.items()):
             if hasattr(val, "__float__"):
                 valstr = "%-8.3g" % val
             else:
@@ -70,11 +68,8 @@ class HumanOutputFormat(KVWriter, SeqWriter):
         # Write out the data
         dashes = "-" * (keywidth + valwidth + 7)
         lines = [dashes]
-        for (key, val) in sorted(key2str.items(), key=lambda kv: kv[0].lower()):
-            lines.append(
-                "| %s%s | %s%s |"
-                % (key, " " * (keywidth - len(key)), val, " " * (valwidth - len(val)))
-            )
+        for key, val in sorted(key2str.items(), key=lambda kv: kv[0].lower()):
+            lines.append("| %s%s | %s%s |" % (key, " " * (keywidth - len(key)), val, " " * (valwidth - len(val))))
         lines.append(dashes)
         self.file.write("\n".join(lines) + "\n")
 
@@ -87,7 +82,7 @@ class HumanOutputFormat(KVWriter, SeqWriter):
 
     def writeseq(self, seq):
         seq = list(seq)
-        for (i, elem) in enumerate(seq):
+        for i, elem in enumerate(seq):
             self.file.write(elem)
             if i < len(seq) - 1:  # add space unless this is the last one
                 self.file.write(" ")
@@ -129,7 +124,7 @@ class CSVOutputFormat(KVWriter):
             self.file.seek(0)
             lines = self.file.readlines()
             self.file.seek(0)
-            for (i, k) in enumerate(self.keys):
+            for i, k in enumerate(self.keys):
                 if i > 0:
                     self.file.write(",")
                 self.file.write(k)
@@ -138,7 +133,7 @@ class CSVOutputFormat(KVWriter):
                 self.file.write(line[:-1])
                 self.file.write(self.sep * len(extra_keys))
                 self.file.write("\n")
-        for (i, k) in enumerate(self.keys):
+        for i, k in enumerate(self.keys):
             if i > 0:
                 self.file.write(",")
             v = kvs.get(k)
@@ -179,9 +174,7 @@ class TensorBoardOutputFormat(KVWriter):
 
         summary = self.tf.Summary(value=[summary_val(k, v) for k, v in kvs.items()])
         event = self.event_pb2.Event(wall_time=time.time(), summary=summary)
-        event.step = (
-            self.step
-        )  # is there any reason why you'd want to specify the step?
+        event.step = self.step  # is there any reason why you'd want to specify the step?
         self.writer.WriteEvent(event)
         self.writer.Flush()
         self.step += 1
@@ -233,7 +226,7 @@ def logkvs(d):
     """
     Log a dictionary of key-value pairs
     """
-    for (k, v) in d.items():
+    for k, v in d.items():
         logkv(k, v)
 
 
@@ -359,7 +352,7 @@ class Logger(object):
     def dumpkvs(self):
         if dist.is_initialized():
             d = defaultdict(float)
-            #dist.barrier()
+            # dist.barrier()
             buffer = th.zeros(len(self.name2val) * 2).cuda()
             counter = 0
 
@@ -375,7 +368,7 @@ class Logger(object):
                 counter += 1
 
             dist.all_reduce(buffer)
-            
+
             counter = 0
             for name in sorted_names:
                 _sum = buffer[counter * 2]
@@ -384,24 +377,20 @@ class Logger(object):
                 eps = 1e-5
                 _mean = (_sum / (_num + eps)).item()
                 d[name] = _mean
-                
 
         elif self.comm is None:
             d = self.name2val
         else:
             d = mpi_weighted_mean(
                 self.comm,
-                {
-                    name: (val, self.name2cnt.get(name, 1))
-                    for (name, val) in self.name2val.items()
-                },
+                {name: (val, self.name2cnt.get(name, 1)) for (name, val) in self.name2val.items()},
             )
             if self.comm.rank != 0:
                 d["dummy"] = 1  # so we don't get a warning about empty dict
         out = d.copy()  # Return the dict for unit testing purposes
         if dist.get_rank() == 0:
-            wandb.log(out, step=int(out['step']))
-            
+            wandb.log(out, step=int(out["step"]))
+
         for fmt in self.output_formats:
             if isinstance(fmt, KVWriter):
                 fmt.writekvs(d)
@@ -436,7 +425,6 @@ class Logger(object):
                 fmt.writeseq(map(str, args))
 
 
-
 def mpi_weighted_mean(comm, local_name2valcount):
     """
     Copied from: https://github.com/openai/baselines/blob/ea25b9e8b234e6ee1bca43083f8f3cf974143998/baselines/common/mpi_util.py#L110
@@ -449,16 +437,12 @@ def mpi_weighted_mean(comm, local_name2valcount):
         name2sum = defaultdict(float)
         name2count = defaultdict(float)
         for n2vc in all_name2valcount:
-            for (name, (val, count)) in n2vc.items():
+            for name, (val, count) in n2vc.items():
                 try:
                     val = float(val)
                 except ValueError:
                     if comm.rank == 0:
-                        warnings.warn(
-                            "WARNING: tried to compute mean on non-float {}={}".format(
-                                name, val
-                            )
-                        )
+                        warnings.warn("WARNING: tried to compute mean on non-float {}={}".format(name, val))
                 else:
                     name2sum[name] += val * count
                     name2count[name] += count
@@ -473,11 +457,7 @@ def configure(dir=None, format_strs=None, comm=None, log_suffix=""):
     """
     if dir is None:
         dir = os.getenv("OPENAI_LOGDIR")
-    if dir is None:
-        dir = osp.join(
-            tempfile.gettempdir(),
-            datetime.datetime.now().strftime("openai-%Y-%m-%d-%H-%M-%S-%f"),
-        )
+
     assert isinstance(dir, str)
     dir = os.path.expanduser(dir)
     os.makedirs(os.path.expanduser(dir), exist_ok=True)
@@ -520,4 +500,3 @@ def scoped_configure(dir=None, format_strs=None, comm=None):
     finally:
         Logger.CURRENT.close()
         Logger.CURRENT = prevlogger
-

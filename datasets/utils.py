@@ -35,7 +35,7 @@ DATASETS_CLASSES = {
 }
 
 
-def save_images(dataset: str, out_dir: str, classnames=None) -> None:
+def save_images(dataset, dataset_name: str, out_dir: str, classnames=None) -> None:
     """
     Save images from the dataset to the output directory.
 
@@ -49,12 +49,13 @@ def save_images(dataset: str, out_dir: str, classnames=None) -> None:
     os.makedirs(out_dir, exist_ok=True)
 
     if classnames is None:
-        classnames = DATASETS_CLASSES.get(dataset.dataset_name, None)
+        classes = DATASETS_CLASSES.get(dataset_name, None)
 
     prog_bar = tqdm(range(len(dataset)))
 
     for i in prog_bar:
         image, label = dataset[i]
-        label = label[0]
-        filename = os.path.join(out_dir, f"{classnames[label]}_{i:05d}.png")
+        if classnames is not None:
+            label = label[0]
+        filename = os.path.join(out_dir, f"{classes[label]}_{i:05d}.png")
         image.save(filename)

@@ -1,10 +1,11 @@
 from contextlib import contextmanager
+import json
 import logging
 from argparse import Namespace
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
-from typing import List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -15,7 +16,6 @@ from torch.utils.data import DataLoader, Dataset
 
 from active_learning.data import ImageAugDataset, ImageDataset
 from active_learning.sampling import random_sampling, uncertainty_sampling
-from active_learning.utils import ActiveLearnerConfig, DatasetConfig, TrainConfig
 from guided_diffusion import dist_util
 from guided_diffusion.resample import create_named_schedule_sampler
 from guided_diffusion.script_util import (
@@ -48,31 +48,56 @@ def distributed_context():
     try:
         dist_util.setup_dist()
         yield
+    except Exception as e:
+        logging.error(f"Error during distributed setup: {str(e)}")
+        raise
     finally:
         if dist.is_initialized():
             dist.destroy_process_group()
 
 
+@dataclass
 class ModelManager:
-    """Handles model initialization and training for different model types."""
+    args: Namespace
+    device: torch.device
 
-    @staticmethod
-    def create_egc_model(args, device):
-        model, diffusion = create_egc_model_and_diffusion(**args_to_dict(args, egc_model_and_diffusion_defaults().keys()))
-        model.to(device)
-        schedule_sampler = create_named_schedule_sampler(args.schedule_sampler, diffusion)
+    def create_egc_model(self):
+        model, diffusion = create_egc_model_and_diffusion(**args_to_dict(self.args, egc_model_and_diffusion_defaults().keys()))
+        model.to(self.device)
+        schedule_sampler = create_named_schedule_sampler(self.args.schedule_sampler, diffusion)
         return model, diffusion, schedule_sampler
 
-    @staticmethod
-    def create_wrn_model(args, device):
-        model = Wide_ResNet(args.depth, args.width, args.in_channels, args.num_classes, args.dropout_rate, args.norm)
-        model.to(device)
-        optim = torch.optim.SGD(model.parameters(), args.lr, momentum=0.9, nesterov=True, weight_decay=5e-4)
-        return model, optim
+    def create_wrn_model(self):
+        model = Wide_ResNet(self.args.depth, self.args.width, self.args.in_channels, self.args.num_classes, self.args.dropout_rate, self.args.norm)
+        model.to(self.device)
+        optim = torch.optim.SGD(model.parameters(), self.args.lr, momentum=0.9, nesterov=True, weight_decay=5e-4)
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(optim, milestones=self.args.decay_epochs, gamma=self.args.decay_rate)
+
+        return model, optim, scheduler
+
+
+@dataclass
+class ALState:
+    """Dataclass to hold the active learning state"""
+
+    iteration: int
+    l_set: List[str]
+    u_set: List[str]
+    checkpoint_path: Optional[str]
+    sampling_method: str
+    budget_ratio: float
+    total_samples: int
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ALState":
+        return cls(**data)
 
 
 class ActiveLearner:
-    def __init__(self, budget_ratio: float, sampling_method: str, args: Namespace):
+    def __init__(self, budget_ratio: float, sampling_method: str, args: Namespace, resume_from: Optional[str] = None):
         """
         Initialize the ActiveLearner with the given configuration.
 
@@ -80,47 +105,151 @@ class ActiveLearner:
             budget_ratio: Ratio of labeled samples to total samples
             sampling_method: Sampling method to use for querying new samples
             args: Command-line arguments
+            resume_from: Path to resume from a previous state
         """
         self.args = args
         self.sampling_method = SamplingMethod.from_string(sampling_method)
+        self.budget_ratio = budget_ratio
 
-        # Initialize dataset splits
-        self.train_files = self._list_image_files(args.data_dir / "train")
-        self.val_files = self._list_image_files(args.data_dir / "val")
+        # Setup paths
+        self.base_dir = Path(args.log_dir)
+        self.checkpoints_dir = self.base_dir / "checkpoints"
+        self.states_dir = self.base_dir / "states"
 
-        # Initialize labeled and unlabeled sets
+        # Create necessary directories
+        self.checkpoints_dir.mkdir(parents=True, exist_ok=True)
+        self.states_dir.mkdir(parents=True, exist_ok=True)
+
+        # Initialize or restore state
+        if resume_from:
+            self._restore_state(resume_from)
+        else:
+            self._initialize_new_state()
+
+    def _initialize_new_state(self) -> None:
+        """Initialize a new active learning state"""
+        self.train_files = self._list_image_files(self.base_dir / "train")
+        self.val_files = self._list_image_files(self.base_dir / "val")
+
         self.total_size = len(self.train_files)
-        self.budget_size = int(self.total_size * budget_ratio)
+        self.budget_size = int(self.total_size * self.budget_ratio)
 
-        # Split the dataset into labeled and unlabeled sets
+        self.current_iteration = 0
         self.l_set = self.train_files[: self.budget_size]
         self.u_set = self.train_files[self.budget_size :]
 
-        # Save the initial sets to disk for resuming training
-        self._save_sets()
+        # Save initial state
+        self._save_current_state()
+
+    def _restore_state(self, state_path: str) -> None:
+        """
+        Restore active learning state from a saved state file.
+
+        Args:
+            state_path: Path to the state file to restore from
+        """
+        state_path = Path(state_path)
+        if not state_path.exists():
+            raise ValueError(f"State file not found: {state_path}")
+
+        # Load state
+        with open(state_path, "r") as f:
+            state_dict = json.load(f)
+            state = ALState.from_dict(state_dict)
+
+        # Restore state
+        self.current_iteration = state.iteration
+        self.l_set = state.l_set
+        self.u_set = state.u_set
+        self.total_size = state.total_samples
+        self.budget_size = int(self.total_size * self.budget_ratio)
+
+        # Validate restored state
+        if len(self.l_set) + len(self.u_set) != self.total_size:
+            raise ValueError("Corrupted state: total samples mismatch")
+
+        logging.info(f"Restored state from iteration {self.current_iteration}")
+        logging.info(f"Labeled samples: {len(self.l_set)}, Unlabeled samples: {len(self.u_set)}")
+
+    def _save_current_state(self) -> Path:
+        """
+        Save current active learning state.
+
+        Returns:
+            Path to the saved state file
+        """
+        state = ALState(
+            iteration=self.current_iteration,
+            l_set=self.l_set,
+            u_set=self.u_set,
+            checkpoint_path=str(self._get_latest_checkpoint_path()),
+            sampling_method=self.sampling_method.value,
+            budget_ratio=self.budget_ratio,
+            total_samples=self.total_size,
+        )
+
+        # Save state to file
+        state_path = self.states_dir / f"state_iter_{self.current_iteration}.json"
+        with open(state_path, "w") as f:
+            json.dump(state.to_dict(), f, indent=2)
+
+        return state_path
+
+    def _get_latest_checkpoint_path(self) -> Optional[Path]:
+        """Get the path to the latest model checkpoint for current iteration"""
+        checkpoint_pattern = f"model_iter_{self.current_iteration}_*.pt"
+        checkpoints = list(self.checkpoints_dir.glob(checkpoint_pattern))
+        return max(checkpoints, default=None)
+
+    def _save_checkpoint(self, model: Module, optimizer: torch.optim.Optimizer) -> Path:
+        """
+        Save a model checkpoint.
+
+        Args:
+            model: The model to save
+            optimizer: The optimizer to save
+
+        Returns:
+            Path to the saved checkpoint
+        """
+        checkpoint_path = self.checkpoints_dir / f"model_iter_{self.current_iteration}_step_{self.current_step}.pt"
+
+        checkpoint = {
+            "iteration": self.current_iteration,
+            "epoch": self.current_epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "args": self.args,
+        }
+
+        torch.save(checkpoint, checkpoint_path)
+        return checkpoint_path
+
+    def _load_checkpoint(self, model: Module, optimizer: torch.optim.Optimizer) -> None:
+        """
+        Load the latest checkpoint for the current iteration.
+
+        Args:
+            model: The model to load state into
+            optimizer: The optimizer to load state into
+        """
+        checkpoint_path = self._get_latest_checkpoint_path()
+        if checkpoint_path is None:
+            logging.warning(f"No checkpoint found for iteration {self.current_iteration}")
+            return
+
+        checkpoint = torch.load(checkpoint_path)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        self.current_step = checkpoint["step"]
+
+        logging.info(f"Restored checkpoint from iteration {self.current_iteration}, step {self.current_step}")
 
     def _list_image_files(self, path: Path) -> List[str]:
         """Recursively list all image files in the given directory."""
 
         valid_extensions = {".jpg", ".jpeg", ".png", ".gif"}
         return [str(f) for f in path.rglob("*") if f.suffix.lower() in valid_extensions]
-
-    def _save_sets(self) -> None:
-        """Save current labeled and unlabeled sets to disk."""
-
-        for name, dataset in [("l_set", self.l_set), ("u_set", self.u_set)]:
-            save_path = self.config.dataset_path / f"{name}.txt"
-            save_path.write_text("\n".join(dataset))
-
-    def _save_class_distribution(self) -> pd.DataFrame:
-        """Analyze and return the class distribution in the labeled set."""
-
-        class_names = [Path(path).stem.split("_")[0] for path in self.l_set]
-        class_counts = pd.Series(class_names).value_counts()
-
-        data = {"class": class_counts.index, "count": class_counts.values, "percentage": (class_counts.values / len(self.l_set) * 100).round(2)}
-        df = pd.DataFrame(data)
-        df.to_csv(self.config.dataset_path / "class_distribution.csv", index=False)
 
     def _create_dataset(self, image_paths: List[str], class_cond: bool = False, augment: bool = False) -> Dataset:
         """Create a dataset from the given image paths."""
@@ -134,9 +263,9 @@ class ActiveLearner:
             classes = [sorted_classes[x] for x in class_names]
 
         return dataset_cls(
-            resolution=self.config.image_size,
+            resolution=self.args.image_size,
             image_paths=image_paths,
-            in_channels=self.config.in_channels,
+            in_channels=self.args.in_channels,
             classes=classes,
             shard=dist.get_rank(),
             num_shards=dist.get_world_size(),
@@ -147,8 +276,8 @@ class ActiveLearner:
 
         return DataLoader(
             dataset,
-            batch_size=self.config.batch_size,
-            num_workers=self.config.num_workers,
+            batch_size=self.args.batch_size,
+            num_workers=8,
             shuffle=shuffle,
             pin_memory=True,
             drop_last=True,
@@ -210,19 +339,19 @@ class ActiveLearner:
         self._save_sets()
 
     def learn(self, args) -> None:
-        """Train the model in an active learning loop with proper distributed cleanup."""
+        """Train the model in an active learning loop."""
 
         with distributed_context():
             device = dist_util.dev()
 
             if args.model == "EGC":
-                self._run_egc_training(device, args)
+                self._run_egc_training(args, device)
             elif args.model == "wrn":
-                self._run_wrn_training(device)
+                self._run_wrn_training(args, device)
             else:
                 raise ValueError(f"Unsupported model type: {args.model}")
 
-    def _run_egc_training(self, device, args):
+    def _run_egc_training(self, args, device) -> None:
         """Run EGC model training loop."""
 
         model, diffusion, schedule_sampler = ModelManager.create_egc_model(args, device)
@@ -272,30 +401,39 @@ class ActiveLearner:
 
             self.query_samples(model)
 
-    def _run_wrn_training(self, device):
+    def _run_wrn_training(self, args, device) -> None:
         """Run Wide-ResNet training loop."""
 
-        model, optim = ModelManager.create_wrn_model(device)
+        model, optim, scheduler = ModelManager(args, device).create_wrn_model()
 
         while True:
             _, data_cls = self.get_train_dataloaders(class_cond=True, deterministic=True)
             val_data = self.get_val_dataloader(class_cond=True)
 
-            WRNTrainer(
+            trainer = WRNTrainer(
                 model=model,
                 optim=optim,
+                scheduler=scheduler,
                 train_data=data_cls,
                 val_data=val_data,
-                device=device,
-            ).run_loop(
-                num_epochs=100,
-                eval_every_epoch=10,
             )
+
+            # Load checkpoint if exists
+            self._load_checkpoint(model, optim)
+
+            # Run training loop with periodic checkpointing
+            def save_callback(epoch):
+                self.current_epoch = epoch
+                self._save_checkpoint(model, optim)
+
+            trainer.run_loop(num_epochs=args.num_epochs, eval_freq=args.eval_freq, save_callback=save_callback)
 
             if self._should_stop_training():
                 break
 
+            self.current_iteration += 1
             self.query_samples(model)
+            self._save_current_state()
 
     def _should_stop_training(self) -> bool:
         """Check if training should stop."""
